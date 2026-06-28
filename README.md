@@ -5,7 +5,7 @@
 ClaudeHop is a lightweight, native macOS app built entirely in Swift. No Electron, no Python runtime — just a single binary that lives quietly in your menu bar and lets you hop between Claude Code accounts in one click.
 
 <p align="center">
-  <img src="img/123.png" alt="ClaudeHop screenshot" width="320">
+  <img src="img/screenshot.png" alt="ClaudeHop screenshot" width="320">
 </p>
 
 <p align="center">
