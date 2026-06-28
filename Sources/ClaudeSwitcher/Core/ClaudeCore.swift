@@ -119,7 +119,14 @@ enum ClaudeCore {
         guard let creds else { return nil }
 
         let acctAttr = KeychainManager.readAccountAttribute(service: KeychainManager.claudeService) ?? "unknown"
-        let status = getAuthStatus()
+        // Retry getAuthStatus up to 4 times — CLI may need a moment after fresh login
+        var status: [String: Any]?
+        for attempt in 0..<4 {
+            status = getAuthStatus()
+            if status?["email"] is String { break }
+            if attempt < 3 { Thread.sleep(forTimeInterval: 1.5) }
+        }
+
         let email: String
         let subType: String
         let orgName: String
@@ -129,12 +136,9 @@ enum ClaudeCore {
             subType = s["subscriptionType"] as? String ?? "unknown"
             orgName = s["orgName"] as? String ?? ""
         } else {
-            guard let data = creds.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let e = json["email"] as? String else { return nil }
-            email = e
-            subType = "unknown"
-            orgName = ""
+            // Claude credentials JSON has no top-level email — cannot import without auth status
+            NSLog("[ClaudeHop] importCurrentAccount — getAuthStatus failed after retries")
+            return nil
         }
 
         guard (try? validateEmail(email)) != nil else { return nil }
@@ -192,20 +196,41 @@ enum ClaudeCore {
 
         runAuthLogout()
         while KeychainManager.deleteCredentials(service: KeychainManager.claudeService) {}
+        KeychainManager.invalidateClaudeServiceCache()
 
         guard runAuthLogin() else {
             if let active,
                let prev = KeychainManager.readCredentials(service: "claude-switcher:\(active.email)") {
+                KeychainManager.invalidateClaudeServiceCache()
                 KeychainManager.writeCredentials(service: KeychainManager.claudeService,
                                                  account: active.keychainAccount, password: prev)
             }
             return nil
         }
 
+        // Give the CLI a moment to finish writing credentials to Keychain
+        Thread.sleep(forTimeInterval: 1)
+        KeychainManager.invalidateClaudeServiceCache()
+
         if let result = importCurrentAccount(configPath: configPath) {
             return result
         }
 
+        // importCurrentAccount failed (auth status not ready) — if same account re-logged in,
+        // update its stored backup with the fresh credentials and return existing account info
+        if let active,
+           let freshCreds = KeychainManager.readCredentials(service: KeychainManager.claudeService) {
+            KeychainManager.writeCredentials(service: "claude-switcher:\(active.email)",
+                                             account: active.keychainAccount, password: freshCreds)
+            let accounts = ConfigManager.loadAccounts(path: configPath)
+            if let existing = accounts.first(where: { $0.email == active.email && $0.provider == "claude" }) {
+                ConfigManager.setActiveAccount(email: active.email, provider: "claude", path: configPath)
+                NSLog("[ClaudeHop] addNewAccount — fallback: refreshed credentials for %@", active.email)
+                return existing
+            }
+        }
+
+        // All else failed — restore previous credentials
         if let active,
            let prev = KeychainManager.readCredentials(service: "claude-switcher:\(active.email)") {
             KeychainManager.writeCredentials(service: KeychainManager.claudeService,

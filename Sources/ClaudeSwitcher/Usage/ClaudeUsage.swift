@@ -4,8 +4,25 @@ enum ClaudeUsage {
     static let usageURL = "https://api.anthropic.com/oauth/usage"
 
     static func fetchUsage(service: String) -> [String: Any]? {
-        guard let creds = KeychainManager.readCredentials(service: service),
-              let token = extractToken(from: creds) else { return nil }
+        NSLog("[ClaudeHop] fetchUsage — service: %@", service)
+
+        guard let creds = KeychainManager.readCredentials(service: service) else {
+            NSLog("[ClaudeHop] fetchUsage — FAIL: cannot read credentials from Keychain")
+            return nil
+        }
+        NSLog("[ClaudeHop] fetchUsage — credentials read OK (%d bytes)", creds.count)
+
+        guard let token = extractToken(from: creds) else {
+            // Log the top-level keys to understand the actual structure
+            if let data = creds.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                NSLog("[ClaudeHop] fetchUsage — FAIL: token extract failed. Top-level keys: %@", json.keys.joined(separator: ", "))
+            } else {
+                NSLog("[ClaudeHop] fetchUsage — FAIL: credentials not valid JSON. First 100 chars: %@", String(creds.prefix(100)))
+            }
+            return nil
+        }
+        NSLog("[ClaudeHop] fetchUsage — token extracted OK (first 12 chars: %@...)", String(token.prefix(12)))
 
         var request = URLRequest(url: URL(string: usageURL)!)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -16,17 +33,32 @@ enum ClaudeUsage {
 
         var result: [String: Any]?
         let sema = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { data, resp, _ in
+        URLSession.shared.dataTask(with: request) { data, resp, error in
             defer { sema.signal() }
+            if let error {
+                NSLog("[ClaudeHop] fetchUsage — network error: %@", error.localizedDescription)
+                return
+            }
             if let http = resp as? HTTPURLResponse {
+                NSLog("[ClaudeHop] fetchUsage — HTTP %d", http.statusCode)
                 if http.statusCode == 401 {
                     result = ["error": "token_expired"]
                     return
                 }
-                guard http.statusCode < 400 else { return }
+                guard http.statusCode < 400 else {
+                    if let data, let body = String(data: data, encoding: .utf8) {
+                        NSLog("[ClaudeHop] fetchUsage — error body: %@", String(body.prefix(300)))
+                    }
+                    return
+                }
             }
-            if let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                result = json
+            if let data {
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    NSLog("[ClaudeHop] fetchUsage — response keys: %@", json.keys.joined(separator: ", "))
+                    result = json
+                } else {
+                    NSLog("[ClaudeHop] fetchUsage — response not JSON: %@", String(String(data: data, encoding: .utf8)?.prefix(200) ?? ""))
+                }
             }
         }.resume()
         sema.wait()
@@ -46,14 +78,40 @@ enum ClaudeUsage {
     }
 
     // Fetch usage for the active account, refreshing the token via Claude CLI if expired.
-    static func fetchActiveUsageWithRefresh() -> [String: Any]? {
+    // If CLI refresh fails, recover from ClaudeHop's stored backup for activeEmail.
+    static func fetchActiveUsageWithRefresh(activeEmail: String? = nil) -> [String: Any]? {
         var usage = fetchUsage(service: KeychainManager.claudeService)
         guard usage?["error"] as? String == "token_expired" else { return usage }
 
-        // Token expired — ask Claude CLI to refresh it, then retry
+        // Round 1: ask Claude CLI to self-refresh
         _ = ClaudeCore.getAuthStatus()
         KeychainManager.invalidateClaudeServiceCache()
         usage = fetchUsage(service: KeychainManager.claudeService)
+        guard usage?["error"] as? String == "token_expired" else { return usage }
+
+        // Round 2: still 401 — recover from ClaudeHop's stored backup
+        guard let email = activeEmail else { return usage }
+        NSLog("[ClaudeHop] fetchActiveUsageWithRefresh — recovering from stored backup for %@", email)
+        return recoverFromStoredCredentials(email: email)
+    }
+
+    // Try claude-switcher:<email>; if valid, copy credentials back to the active Keychain slot.
+    private static func recoverFromStoredCredentials(email: String) -> [String: Any]? {
+        let storedService = "claude-switcher:\(email)"
+        let usage = fetchUsage(service: storedService)
+        guard usage != nil, usage?["error"] as? String != "token_expired" else {
+            NSLog("[ClaudeHop] recoverFromStoredCredentials — stored token also expired or missing")
+            return usage
+        }
+
+        // Restore the fresh token into the active Claude CLI slot
+        if let creds = KeychainManager.readCredentials(service: storedService) {
+            let account = KeychainManager.readAccountAttribute(service: storedService) ?? email
+            let activeService = KeychainManager.claudeService
+            if KeychainManager.writeCredentials(service: activeService, account: account, password: creds) {
+                NSLog("[ClaudeHop] recoverFromStoredCredentials — restored credentials to active slot (%@)", activeService)
+            }
+        }
         return usage
     }
 

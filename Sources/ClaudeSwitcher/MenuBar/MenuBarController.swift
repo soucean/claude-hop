@@ -19,18 +19,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - MenuBarController
 
-class MenuBarController {
+class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private var usageCache: [String: String] = [:]
     private var usageStateCache: [String: UsageState] = [:]
     private var refreshInProgress = false
     private var switchInProgress: Set<String> = []
     private var lastAutoSwitchAttempt: [String: Date] = [:]
+    private var lastFetchDate: Date?
+    private let minFetchInterval: TimeInterval = 30
     private var refreshTimer: Timer?
     private let configPath = ConfigManager.defaultConfigPath
 
-    init() {
+    override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        super.init()
         setupIcon()
         firstLaunch()
         rebuildMenu()
@@ -124,7 +127,14 @@ class MenuBarController {
         menu.addItem(.separator())
         menu.addItem(makeItem("⏻  Quit", action: #selector(onQuit)))
 
+        menu.delegate = self
         statusItem.menu = menu
+    }
+
+    // MARK: - NSMenuDelegate
+
+    func menuWillOpen(_ menu: NSMenu) {
+        fetchAllUsage()
     }
 
     private func addProviderSection(to menu: NSMenu, provider: String, accounts: [AccountInfo]) {
@@ -236,7 +246,7 @@ class MenuBarController {
                                 body: email)
                 }
                 self.rebuildMenu()
-                self.fetchAllUsage()
+                self.fetchAllUsage(force: true)
             }
         }
     }
@@ -259,7 +269,7 @@ class MenuBarController {
                                 body: "Login was cancelled or failed.")
                 }
                 self.rebuildMenu()
-                self.fetchAllUsage()
+                self.fetchAllUsage(force: true)
             }
         }
     }
@@ -282,7 +292,7 @@ class MenuBarController {
                                 body: "Login was cancelled or failed.")
                 }
                 self.rebuildMenu()
-                self.fetchAllUsage()
+                self.fetchAllUsage(force: true)
             }
         }
     }
@@ -315,19 +325,28 @@ class MenuBarController {
                subtitle: "\(providerLabels[account.provider] ?? account.provider) account removed",
                body: account.email)
         rebuildMenu()
-        fetchAllUsage()
+        fetchAllUsage(force: true)
     }
 
-    @objc private func onRefreshUsage(_ sender: Any) { fetchAllUsage() }
+    @objc private func onRefreshUsage(_ sender: Any) { fetchAllUsage(force: true) }
 
     @objc private func onQuit(_ sender: Any) { NSApplication.shared.terminate(nil) }
 
     // MARK: - Usage fetching
 
-    private func fetchAllUsage() {
+    private func fetchAllUsage(force: Bool = false) {
+        let now = Date()
+        if !force, let last = lastFetchDate, now.timeIntervalSince(last) < minFetchInterval { return }
         guard !refreshInProgress else { return }
         refreshInProgress = true
+        lastFetchDate = now
+
+        // Show loading state in-place (no menu rebuild needed)
         let accounts = ConfigManager.loadAccounts(path: configPath)
+        for account in accounts {
+            usageCache["\(account.provider):\(account.email)"] = "Loading..."
+        }
+        updateUsageLabels()
         let activeByProvider: [String: AccountInfo?] = [
             "claude": ConfigManager.getActiveAccount(provider: "claude", path: configPath),
             "codex": ConfigManager.getActiveAccount(provider: "codex", path: configPath),
@@ -357,14 +376,16 @@ class MenuBarController {
                 let switched = autoSwitchResults.contains { $0.0 == "switched" }
                 if switched { self.rebuildMenu() }
                 self.updateUsageLabels()
-                if switched { self.fetchAllUsage() }
+                if switched { self.fetchAllUsage(force: true) }
             }
         }
     }
 
     private func fetchUsageState(account: AccountInfo, isActive: Bool) -> UsageState {
         if account.provider == "claude" {
-            let usage = isActive ? ClaudeUsage.fetchActiveUsageWithRefresh() : ClaudeUsage.fetchUsageForAccount(email: account.email)
+            let usage = isActive
+                ? ClaudeUsage.fetchActiveUsageWithRefresh(activeEmail: account.email)
+                : ClaudeUsage.fetchUsageForAccount(email: account.email)
             return ClaudeUsage.claudeUsageState(usage)
         } else {
             let usage = isActive ? CodexUsage.fetchActiveCodexUsage() : CodexUsage.fetchCodexUsageForAccount(email: account.email)
@@ -408,24 +429,19 @@ class MenuBarController {
         return ("switched", target.email)
     }
 
+    // Update usage text in-place so the menu reflects new data even while it's open.
     private func updateUsageLabels() {
         guard let menu = statusItem.menu else { return }
-        for item in menu.items {
-            guard let sub = item.submenu else { continue }
-            for subItem in sub.items {
-                if let account = subItem.representedObject as? AccountInfo {
-                    let key = "\(account.provider):\(account.email)"
-                    if let text = usageCache[key] {
-                        // Find the usage line below this account item
-                        if let idx = sub.items.firstIndex(of: subItem), idx + 1 < sub.items.count {
-                            sub.items[idx + 1].title = "       │  \(text)"
-                        }
-                    }
-                }
+        let items = menu.items
+        for (i, item) in items.enumerated() {
+            guard let account = item.representedObject as? AccountInfo else { continue }
+            let key = "\(account.provider):\(account.email)"
+            let text = usageCache[key] ?? "•••"
+            let nextIdx = i + 1
+            if nextIdx < items.count {
+                items[nextIdx].title = "       │  \(text)"
             }
         }
-        // Simpler: just rebuild menu in place
-        rebuildMenu()
     }
 
     // MARK: - Notifications & alerts
