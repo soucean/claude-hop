@@ -364,7 +364,7 @@ class MenuBarController {
 
     private func fetchUsageState(account: AccountInfo, isActive: Bool) -> UsageState {
         if account.provider == "claude" {
-            let usage = isActive ? ClaudeUsage.fetchActiveUsage() : ClaudeUsage.fetchUsageForAccount(email: account.email)
+            let usage = isActive ? ClaudeUsage.fetchActiveUsageWithRefresh() : ClaudeUsage.fetchUsageForAccount(email: account.email)
             return ClaudeUsage.claudeUsageState(usage)
         } else {
             let usage = isActive ? CodexUsage.fetchActiveCodexUsage() : CodexUsage.fetchCodexUsageForAccount(email: account.email)

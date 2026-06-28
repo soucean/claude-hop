@@ -3,10 +3,22 @@ import Security
 
 enum KeychainManager {
     // Claude CLI may append a machine-specific hash: "Claude Code-credentials-{hash}"
-    // Discover the actual service name at runtime.
     static let claudeServicePrefix = "Claude Code-credentials"
 
+    // Cached after first resolution — invalidated when switch occurs
+    private static var _claudeService: String?
+
     static var claudeService: String {
+        if let cached = _claudeService { return cached }
+        _claudeService = resolveClaudeService()
+        return _claudeService!
+    }
+
+    static func invalidateClaudeServiceCache() {
+        _claudeService = nil
+    }
+
+    private static func resolveClaudeService() -> String {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecMatchLimit: kSecMatchLimitAll,
@@ -17,10 +29,9 @@ enum KeychainManager {
               let items = result as? [[CFString: Any]] else {
             return claudeServicePrefix
         }
-        // Prefer hashed variant if present, fall back to plain
         let services = items.compactMap { $0[kSecAttrService] as? String }
             .filter { $0.hasPrefix(claudeServicePrefix) }
-            .sorted { $0.count > $1.count }   // longer = hashed variant first
+            .sorted { $0.count > $1.count }
         return services.first ?? claudeServicePrefix
     }
 

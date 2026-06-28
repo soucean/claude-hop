@@ -12,12 +12,19 @@ enum ClaudeUsage {
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("claude-code/2.1.11", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 5
+        request.timeoutInterval = 8
 
         var result: [String: Any]?
         let sema = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        URLSession.shared.dataTask(with: request) { data, resp, _ in
             defer { sema.signal() }
+            if let http = resp as? HTTPURLResponse {
+                if http.statusCode == 401 {
+                    result = ["error": "token_expired"]
+                    return
+                }
+                guard http.statusCode < 400 else { return }
+            }
             if let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 result = json
             }
@@ -27,16 +34,35 @@ enum ClaudeUsage {
     }
 
     static func fetchUsageForAccount(email: String) -> [String: Any]? {
-        fetchUsage(service: "claude-switcher:\(email)")
+        let usage = fetchUsage(service: "claude-switcher:\(email)")
+        if usage?["error"] as? String == "token_expired" {
+            return ["error": "session_expired"]
+        }
+        return usage
     }
 
     static func fetchActiveUsage() -> [String: Any]? {
         fetchUsage(service: KeychainManager.claudeService)
     }
 
+    // Fetch usage for the active account, refreshing the token via Claude CLI if expired.
+    static func fetchActiveUsageWithRefresh() -> [String: Any]? {
+        var usage = fetchUsage(service: KeychainManager.claudeService)
+        guard usage?["error"] as? String == "token_expired" else { return usage }
+
+        // Token expired — ask Claude CLI to refresh it, then retry
+        _ = ClaudeCore.getAuthStatus()
+        KeychainManager.invalidateClaudeServiceCache()
+        usage = fetchUsage(service: KeychainManager.claudeService)
+        return usage
+    }
+
     static func claudeUsageState(_ usage: [String: Any]?) -> UsageState {
         guard let usage else {
             return UsageState(available: false, display: "Usage unavailable")
+        }
+        if usage["error"] != nil {
+            return UsageState(available: false, display: "Session expired")
         }
 
         var parts: [String] = []
