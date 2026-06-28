@@ -4,6 +4,16 @@
 
 ClaudeHop is a lightweight, native macOS app built entirely in Swift. No Electron, no Python runtime — just a single binary that lives quietly in your menu bar and lets you hop between Claude Code accounts in one click.
 
+<p align="center">
+  <img src="img/123.png" alt="ClaudeHop screenshot" width="320">
+</p>
+
+<p align="center">
+  <a href="https://github.com/soucean/claude-hop/releases/latest">
+    <img src="https://img.shields.io/github/v/release/soucean/claude-hop?style=for-the-badge&label=Download&color=0A84FF" alt="Download latest release">
+  </a>
+</p>
+
 ---
 
 ## Why ClaudeHop?
@@ -25,29 +35,21 @@ ClaudeHop eliminates that. It stores each account's credentials securely in macO
 
 ---
 
+## Download
+
+**[→ Download latest release](https://github.com/soucean/claude-hop/releases/latest)**
+
+1. Download `ClaudeHop-vX.X.X-macOS.zip`
+2. Unzip and drag `ClaudeHop.app` to `/Applications`
+3. First launch: **right-click → Open** (required once to bypass Gatekeeper for unsigned apps)
+
+---
+
 ## Requirements
 
 - macOS 13 Ventura or later
 - [Claude Code CLI](https://claude.ai/code) installed (`npm install -g @anthropic-ai/claude-code`)
 - At least one Claude account already logged in via `claude auth login`
-
----
-
-## Install
-
-```bash
-git clone https://github.com/your-username/claudehop
-cd claudehop
-bash install.sh
-cp -r "dist/ClaudeHop.app" /Applications/
-open "/Applications/ClaudeHop.app"
-```
-
-The app icon appears in your menu bar. That's it.
-
-### First launch
-
-On first launch, ClaudeHop auto-imports your currently logged-in Claude account. If macOS shows a Keychain permission dialog, click **"Always Allow"** — this is a one-time step so the app can read and write your credentials without prompting again.
 
 ---
 
@@ -88,17 +90,14 @@ Claude CLI sees valid credentials and works normally. No patching, no proxying, 
 
 ## Build from source
 
-Requires Swift 5.9+ (comes with Xcode or install via `xcode-select --install`).
+Requires Swift 5.9+ (comes with Xcode or `xcode-select --install`).
 
 ```bash
-# Development
-swift run
-
-# Release build + .app bundle
+git clone https://github.com/soucean/claude-hop
+cd claude-hop
 bash install.sh
-
-# Open in Xcode
-open Package.swift
+cp -r "dist/ClaudeHop.app" /Applications/
+open "/Applications/ClaudeHop.app"
 ```
 
 ---
@@ -107,7 +106,7 @@ open Package.swift
 
 ClaudeHop makes exactly two types of network requests:
 
-1. `api.anthropic.com/oauth/usage` — to display your usage stats (same endpoint Claude CLI uses)
+1. `api.anthropic.com/oauth/usage` — to display your usage stats
 2. Nothing else. No analytics, no crash reporting, no telemetry.
 
 All credentials stay in your local macOS Keychain.
@@ -116,14 +115,14 @@ All credentials stay in your local macOS Keychain.
 
 ## Contributing
 
-Issues and PRs are welcome. The codebase is small — around 700 lines of Swift across 10 files.
+Issues and PRs are welcome. The codebase is ~700 lines of Swift across 10 files.
 
 ```
 Sources/ClaudeSwitcher/
 ├── MenuBar/        ← NSStatusItem, menu, app lifecycle
 ├── Core/           ← Claude CLI subprocess logic
 ├── Keychain/       ← Security.framework wrapper
-├── Config/         ← JSON persistence (~/.config/claudehop/)
+├── Config/         ← JSON persistence
 ├── Usage/          ← Anthropic usage API client
 ├── AutoSwitch/     ← Auto-switch decision logic
 └── Models/         ← AccountInfo, UsageState
@@ -133,4 +132,4 @@ Sources/ClaudeSwitcher/
 
 ## License
 
-MIT — free to use, modify, and distribute.
+MIT
