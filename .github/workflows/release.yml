@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Package .app bundle
+        run: |
+          APP="ClaudeHop"
+          APP_DIR="dist/${APP}.app/Contents"
+          BINARY=".build/arm64-apple-macosx/release/${APP}"
+
+          mkdir -p "${APP_DIR}/MacOS" "${APP_DIR}/Resources"
+          cp "$BINARY" "${APP_DIR}/MacOS/${APP}"
+
+          cat > "${APP_DIR}/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>ClaudeHop</string>
+              <key>CFBundleDisplayName</key>
+              <string>ClaudeHop</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.local.claudehop</string>
+              <key>CFBundleVersion</key>
+              <string>${{ github.ref_name }}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${{ github.ref_name }}</string>
+              <key>CFBundleExecutable</key>
+              <string>ClaudeHop</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>NSAppTransportSecurity</key>
+              <dict>
+                  <key>NSAllowsArbitraryLoads</key>
+                  <true/>
+              </dict>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Zip app
+        run: |
+          cd dist
+          zip -r --symlinks ClaudeHop-${{ github.ref_name }}-macOS.zip ClaudeHop.app
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ClaudeHop ${{ github.ref_name }}
+          body: |
+            ## Install
+
+            1. Download **ClaudeHop-${{ github.ref_name }}-macOS.zip** below
+            2. Unzip and drag `ClaudeHop.app` to `/Applications`
+            3. First launch: right-click → **Open** (bypass Gatekeeper for unsigned apps)
+
+            ## Requirements
+            - macOS 13 Ventura or later
+            - [Claude Code CLI](https://claude.ai/code) installed and logged in
+          files: dist/ClaudeHop-${{ github.ref_name }}-macOS.zip
+          generate_release_notes: false
