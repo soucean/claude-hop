@@ -41,14 +41,21 @@ ClaudeHop eliminates that. It stores each account's credentials securely in macO
 
 1. Download `ClaudeHop-vX.X.X-macOS.zip`
 2. Unzip and drag `ClaudeHop.app` to `/Applications`
-3. First launch: **right-click → Open** (required once to bypass Gatekeeper for unsigned apps)
+3. First launch: if macOS shows **"app is damaged and can't be opened"**, run:
+   ```bash
+   xattr -cr /Applications/ClaudeHop.app
+   ```
+   Then open normally. This is a one-time step for unsigned apps.
 
 ---
 
 ## Requirements
 
 - macOS 13 Ventura or later
-- [Claude Code CLI](https://claude.ai/code) installed (`npm install -g @anthropic-ai/claude-code`)
+- [Claude Code CLI](https://code.claude.com/docs/en/quickstart) installed:
+  ```bash
+  curl -fsSL https://claude.ai/install.sh | bash
+  ```
 - At least one Claude account already logged in via `claude auth login`
 
 ---
